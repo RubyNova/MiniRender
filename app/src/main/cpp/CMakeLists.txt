@@ -7,6 +7,7 @@ cmake_minimum_required(VERSION 3.10.2)
 
 set(APP_GLUE_DIR ${ANDROID_NDK}/sources/android/native_app_glue)
 include_directories(${APP_GLUE_DIR})
+include_directories(ThirdParty)
 add_library(app-glue STATIC ${APP_GLUE_DIR}/android_native_app_glue.c)
 
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -u ANativeActivity_onCreate")
@@ -18,7 +19,7 @@ add_library( # Sets the name of the library.
              SHARED
 
              # Provides a relative path to your source file(s).
-             native-lib.cpp )
+             MiniRenderMain.cpp ThirdParty/stb_image.h VulkanMain.cpp VulkanMain.hpp CreateShaderModule.cpp CreateShaderModule.h)
 
 find_library( # Sets the name of the path variable.
               log-lib
