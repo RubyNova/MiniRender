@@ -15,10 +15,11 @@
 #include <android/log.h>
 #include <cassert>
 #include <vector>
-#include "vulkan_wrapper.h"
+#include <vulkan/vulkan.h>
+#include <vulkan/vulkan_android.h>
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
-#include <stb/stb_image.h>
+#include "ThirdParty/stb_image.h"
 #include "CreateShaderModule.h"
 #include "VulkanMain.hpp"
 
