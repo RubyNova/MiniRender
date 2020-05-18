@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+
+//Modified by Matt Jones, 2020.
+
+#include <string>
 #include <android/log.h>
 #include <cassert>
 #include <vector>
@@ -19,8 +23,7 @@
 #include <vulkan/vulkan_android.h>
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
-#include "ThirdParty/stb_image.h"
-#include "CreateShaderModule.h"
+#include "ThirdParty/stb/stb_image.h"
 #include "VulkanMain.hpp"
 
 // Android log function wrappers
@@ -121,6 +124,25 @@ void setImageLayout(VkCommandBuffer cmdBuffer, VkImage image,
                     VkImageLayout oldImageLayout, VkImageLayout newImageLayout,
                     VkPipelineStageFlags srcStages,
                     VkPipelineStageFlags destStages);
+
+VkResult loadShaderFromSpirV(const std::string& spvFile, VkShaderModule* shaderOut) {
+    AAsset* file = AAssetManager_open(androidAppCtx->activity->assetManager,
+                                      spvFile.c_str(), AASSET_MODE_BUFFER);
+    size_t fileLength = AAsset_getLength(file);
+    char* fileContent = new char[fileLength];
+    AAsset_read(file, fileContent, fileLength);
+
+    VkShaderModuleCreateInfo shaderModuleCreateInfo{
+            .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+            .pNext = nullptr,
+            .codeSize = fileLength,
+            .pCode = reinterpret_cast<uint32_t*>(fileContent),
+            .flags = 0,
+    };
+
+
+    return vkCreateShaderModule(device.device_, &shaderModuleCreateInfo, nullptr, shaderOut);
+}
 
 // Create vulkan device
 void CreateVulkanDevice(ANativeWindow* platformWindow,
@@ -679,8 +701,8 @@ bool MapMemoryTypeToIndex(uint32_t typeBits, VkFlags requirements_mask,
 bool CreateBuffers(void) {
   // Vertex positions
   const float vertexData[] = {
-      -1.0f, -1.0f, 0.0f, 0.0f, 0.0f, 1.0f, -1.0f, 0.0f,
-      1.0f,  0.0f,  0.0f, 1.0f, 0.0f, 0.5f, 1.0f,
+          -1.0f, -1.0f, 0.0f, 0.0f, 0.0f, 1.0f, -1.0f, 0.0f,
+          1.0f,  0.0f,  0.0f, 1.0f, 0.0f, 0.5f, 1.0f,
   };
 
   // Create a vertex buffer
@@ -771,14 +793,21 @@ VkResult CreateGraphicsPipeline(void) {
       .dynamicStateCount = 0,
       .pDynamicStates = nullptr};
 
-  VkShaderModule vertexShader, fragmentShader;
-  buildShaderFromFile(androidAppCtx, "shaders/tri.vert",
-                      VK_SHADER_STAGE_VERTEX_BIT, device.device_,
-                      &vertexShader);
-  buildShaderFromFile(androidAppCtx, "shaders/tri.frag",
-                      VK_SHADER_STAGE_FRAGMENT_BIT, device.device_,
-                      &fragmentShader);
-  // Specify vertex and fragment shader stages
+    VkShaderModule vertexShader, fragmentShader;
+
+    VkResult vertResult = loadShaderFromSpirV("shaders/BasicVertexShader.vert.spv", &vertexShader);
+
+    if(vertResult != VK_SUCCESS) {
+        throw new std::runtime_error("VERT COMPILATION RESULT: " + std::to_string(vertResult));
+    }
+
+    VkResult fragResult = loadShaderFromSpirV("shaders/BasicFragmentShader.frag.spv", &fragmentShader);
+
+    if(fragResult != VK_SUCCESS) {
+        throw new std::runtime_error("VERT COMPILATION RESULT: " + std::to_string(fragResult));
+    }
+
+    // Specify vertex and fragment shader stages
   VkPipelineShaderStageCreateInfo shaderStages[2]{
       {
           .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -1010,11 +1039,6 @@ VkResult CreateDescriptorSet(void) {
 //   upon return, vulkan is ready to draw frames
 bool InitVulkan(android_app* app) {
   androidAppCtx = app;
-
-  if (!InitVulkan()) {
-    LOGW("Vulkan is unavailable, install vulkan and re-start");
-    return false;
-  }
 
   VkApplicationInfo appInfo = {
       .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
