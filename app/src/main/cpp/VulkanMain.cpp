@@ -241,6 +241,59 @@ void CreateVulkanDevice(ANativeWindow* platformWindow,
   vkGetDeviceQueue(device.device_, 0, 0, &device.queue_);
 }
 
+std::vector<VkBuffer> cameraUboBuffers;
+std::vector<VkDeviceMemory> cameraUboBuffersMemory;
+
+uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+  VkPhysicalDeviceMemoryProperties memProperties;
+  vkGetPhysicalDeviceMemoryProperties(device.gpuDevice_, &memProperties);
+
+  for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+    if (typeFilter & (1 << i)) {
+      return i;
+    }
+  }
+
+  throw std::runtime_error("failed to find suitable memory type!");
+}
+
+void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
+  VkBufferCreateInfo bufferInfo{};
+  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  bufferInfo.size = size;
+  bufferInfo.usage = usage;
+  bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+  if (vkCreateBuffer(device.device_, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
+    throw std::runtime_error("failed to create buffer!");
+  }
+
+  VkMemoryRequirements memRequirements;
+  vkGetBufferMemoryRequirements(device.device_, buffer, &memRequirements);
+
+  VkMemoryAllocateInfo allocInfo{};
+  allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  allocInfo.allocationSize = memRequirements.size;
+  allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
+
+  if (vkAllocateMemory(device.device_, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
+    throw std::runtime_error("failed to allocate buffer memory!");
+  }
+
+  vkBindBufferMemory(device.device_, buffer, bufferMemory, 0);
+}
+
+void createUniformBuffers() {
+  VkDeviceSize bufferSize = sizeof(glm::mat4);
+
+  cameraUboBuffers.resize(swapchain.swapchainLength_);
+  cameraUboBuffersMemory.resize(swapchain.swapchainLength_);
+
+  for (size_t i = 0; i < swapchain.swapchainLength_; i++) {
+    createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, cameraUboBuffers[i], cameraUboBuffersMemory[i]);
+  }
+}
+
 void CreateSwapChain(void) {
   LOGI("->createSwapChain");
   memset(&swapchain, 0, sizeof(swapchain));
@@ -310,6 +363,13 @@ void DeleteSwapChain(void) {
   delete[] swapchain.framebuffers_;
   delete[] swapchain.displayViews_;
   delete[] swapchain.displayImages_;
+
+
+
+  for (size_t i = 0; i < swapchain.swapchainLength_; i++) {
+    vkDestroyBuffer(device.device_, cameraUboBuffers[i], nullptr);
+    vkFreeMemory(device.device_, cameraUboBuffersMemory[i], nullptr);
+  }
 
   vkDestroySwapchainKHR(device.device_, swapchain.swapchain_, nullptr);
 }
@@ -702,13 +762,15 @@ bool MapMemoryTypeToIndex(uint32_t typeBits, VkFlags requirements_mask,
 
 // Create our vertex buffer
 bool CreateBuffers(void) {
+
+  createUniformBuffers();
   // Vertex positions
   const float vertexData[] = {
-          -1.0f, -1.0f, 0.0f, 0.0f,
+          -1.0f, -1.0f, 0.0f, 1.0f,
           0.0f, 1.0f,
           1.0f, -1.0f, 0.0f, 1.0f,
           0.0f, 0.0f,
-          0.0f, 1.0f, 0.0f, 0.5f,
+          0.0f, 1.0f, 0.0f, 1.0f,
           1.0f, 0.0f
   };
 
@@ -766,6 +828,11 @@ void DeleteBuffers(void) {
 VkResult CreateGraphicsPipeline(void) {
   memset(&gfxPipeline, 0, sizeof(gfxPipeline));
 
+  camera.setPerspective(35.0f, 19.5f/9.0f, 0.1f, 100.0f);
+  camera.setPosition(glm::vec3(0, 0, -1));
+  camera.setRotation(glm::vec3(0, 0, 0));
+
+
   const VkDescriptorSetLayoutBinding descriptorSetLayoutBinding{
       .binding = 0,
       .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -773,12 +840,26 @@ VkResult CreateGraphicsPipeline(void) {
       .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
       .pImmutableSamplers = nullptr,
   };
+
+  const VkDescriptorSetLayoutBinding uboCameraLayoutBinding{
+    .binding = 1,
+    .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+    .descriptorCount = 1,
+    .stageFlags = VK_SHADER_STAGE_VERTEX_BIT
+  };
+
+  const VkDescriptorSetLayoutBinding bindingCollection[] = {
+          descriptorSetLayoutBinding,
+          uboCameraLayoutBinding
+  };
+
   const VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo = {
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
       .pNext = nullptr,
-      .bindingCount = 1,
-      .pBindings = &descriptorSetLayoutBinding,
+      .bindingCount = 2,
+      .pBindings = &bindingCollection[0],
   };
+
   CALL_VK(vkCreateDescriptorSetLayout(device.device_,
                                       &descriptorSetLayoutCreateInfo, nullptr,
                                       &gfxPipeline.dscLayout_));
@@ -996,14 +1077,25 @@ void DeleteGraphicsPipeline(void) {
 VkResult CreateDescriptorSet(void) {
   const VkDescriptorPoolSize type_count = {
       .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-      .descriptorCount = TUTORIAL_TEXTURE_COUNT,
+      .descriptorCount = 1,
   };
+
+    const VkDescriptorPoolSize uboPool = {
+            .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .descriptorCount = 1,
+    };
+
+    const VkDescriptorPoolSize pools[] = {
+            type_count,
+            uboPool
+    };
+
   const VkDescriptorPoolCreateInfo descriptor_pool = {
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
       .pNext = nullptr,
       .maxSets = 1,
-      .poolSizeCount = 1,
-      .pPoolSizes = &type_count,
+      .poolSizeCount = 2,
+      .pPoolSizes = &pools[0],
   };
 
   CALL_VK(vkCreateDescriptorPool(device.device_, &descriptor_pool, nullptr,
@@ -1015,8 +1107,11 @@ VkResult CreateDescriptorSet(void) {
       .descriptorPool = gfxPipeline.descPool_,
       .descriptorSetCount = 1,
       .pSetLayouts = &gfxPipeline.dscLayout_};
-  CALL_VK(vkAllocateDescriptorSets(device.device_, &alloc_info,
-                                   &gfxPipeline.descSet_));
+  //CALL_VK(vkAllocateDescriptorSets(device.device_, &alloc_info, &gfxPipeline.descSet_));
+  VkResult descriptorSetsResult = vkAllocateDescriptorSets(device.device_, &alloc_info, &gfxPipeline.descSet_);
+                                   if(descriptorSetsResult != VK_SUCCESS) {
+                                       throw std::runtime_error("VK ERROR: " + std::to_string(descriptorSetsResult));
+                                   }
 
   VkDescriptorImageInfo texDsts[TUTORIAL_TEXTURE_COUNT];
   memset(texDsts, 0, sizeof(texDsts));
@@ -1249,6 +1344,15 @@ void DeleteVulkan() {
   device.initialized_ = false;
 }
 
+void updateUniformBuffer(int32_t currentImage) {
+  glm::mat4 result = camera.matrices.perspective * camera.matrices.view;
+  void* data;
+  vkMapMemory(device.device_, cameraUboBuffersMemory[currentImage], 0, sizeof(glm::mat4), 0, &data); //this is causing a segfault and I have no idea why
+
+  memcpy(data, &result, sizeof(glm::mat4));
+  vkUnmapMemory(device.device_, cameraUboBuffersMemory[currentImage]);
+}
+
 // Draw one frame
 bool VulkanDrawFrame(void) {
   uint32_t nextIndex;
@@ -1260,6 +1364,9 @@ bool VulkanDrawFrame(void) {
 
   VkPipelineStageFlags waitStageMask =
       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+  updateUniformBuffer(nextIndex);
+
   VkSubmitInfo submit_info = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
                               .pNext = nullptr,
                               .waitSemaphoreCount = 1,
