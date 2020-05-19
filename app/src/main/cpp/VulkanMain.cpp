@@ -25,6 +25,7 @@
 #define STBI_ONLY_PNG
 #include "ThirdParty/stb/stb_image.h"
 #include "VulkanMain.hpp"
+#include "MiniRenderCamera.h"
 
 // Android log function wrappers
 static const char* kTAG = "Vulkan-Tutorial06";
@@ -47,6 +48,8 @@ static const char* kTAG = "Vulkan-Tutorial06";
 // A macro to check value is VK_SUCCESS
 // Used also for non-vulkan functions but return VK_SUCCESS
 #define VK_CHECK(x) CALL_VK(x)
+
+MiniRenderCamera camera = MiniRenderCamera();
 
 // Global Variables ...
 struct VulkanDeviceInfo {
@@ -701,8 +704,12 @@ bool MapMemoryTypeToIndex(uint32_t typeBits, VkFlags requirements_mask,
 bool CreateBuffers(void) {
   // Vertex positions
   const float vertexData[] = {
-          -1.0f, -1.0f, 0.0f, 0.0f, 0.0f, 1.0f, -1.0f, 0.0f,
-          1.0f,  0.0f,  0.0f, 1.0f, 0.0f, 0.5f, 1.0f,
+          -1.0f, -1.0f, 0.0f, 0.0f,
+          0.0f, 1.0f,
+          1.0f, -1.0f, 0.0f, 1.0f,
+          0.0f, 0.0f,
+          0.0f, 1.0f, 0.0f, 0.5f,
+          1.0f, 0.0f
   };
 
   // Create a vertex buffer
@@ -904,7 +911,7 @@ VkResult CreateGraphicsPipeline(void) {
   // Specify vertex input state
   VkVertexInputBindingDescription vertex_input_bindings{
       .binding = 0,
-      .stride = 5 * sizeof(float),
+      .stride = 6 * sizeof(float),
       .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
   };
   VkVertexInputAttributeDescription vertex_input_attributes[2]{

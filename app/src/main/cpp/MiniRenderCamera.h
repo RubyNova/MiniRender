@@ -7,7 +7,7 @@
 #include "ThirdParty/glm/glm/gtc/quaternion.hpp"
 #include "ThirdParty/glm/glm/gtc/matrix_transform.hpp"
 
-class Camera
+class MiniRenderCamera
 {
 private:
     float fov;
